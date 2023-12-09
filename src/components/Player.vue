@@ -7,12 +7,24 @@ import { readBinaryFile } from "@tauri-apps/api/fs"
 import { open } from "@tauri-apps/api/dialog"
 import { convertFileSrc } from '@tauri-apps/api/tauri';
 
+let loaded = reactive(false);
+
+let appData = reactive({
+  library: {},
+  current_speed: 1,
+});
+
+// get our appData from rust
+invoke("get_app_data").then((data) => {
+  appData = data;
+  console.log('got app data', appData);
+});
+
 // object with info about current playback
 const stats = reactive({
   currentTrack: null,
   currentTrackDuration: null,
   currentTrackProgress: null,
-  playbackRate: 1,
 });
 
 // update the stats
@@ -56,7 +68,7 @@ async function playAudioFile() {
               ext: [stats.currentTrack.split('.').pop()],
             });
             audio.play();
-            audio.rate(stats.playbackRate);
+            audio.rate(appData.current_speed);
             console.log('playing audio', audio);
           }
         })
@@ -69,16 +81,20 @@ async function playAudioFile() {
     })
 };
 
-function pauseAudioFile() {
-  audio.pause();
-}
-
 function togglePlay(){
   return audio.playing() ? audio.pause() : audio.play();
 };
 
-function changePlaybackRate() {
-  audio.rate(stats.playbackRate);
+function rewind() {
+  audio.seek(audio.seek() - 10);
+}
+
+function skip() {
+  audio.seek(audio.seek() + 10);
+}
+
+function changecurrent_speed() {
+  audio.rate(appData.current_speed);
 }
 
 function seekAudioFile() {
@@ -109,48 +125,49 @@ async function selectAudioFile() {
 }
 
 async function greet() {
-  // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
   greetMsg.value = await invoke("greet", { name: name.value });
   selectAudioFile();
-  // selectImage();
 }
+
+loaded = true;
+
 </script>
 
 <template>
+  <div v-if="loaded">
+    <!-- play pause buttons etc -->
+    <div class="row">
+      <button @click="rewind()">Rewind</button>
+      <button @click="togglePlay()">Toggle</button>
+      <button @click="skip()">Skip</button>
+    </div>
 
-  <!-- play pause buttons etc -->
-  <div class="row">
-    <button @click="playAudioFile()">Play</button>
-    <button @click="pauseAudioFile()">Pause</button>
-    <button @click="stopAudioFile()">Stop</button>
-    <button @click="togglePlay()">Toggle</button>
+    <!-- progress bar where we can move around -->
+    <div class="row">
+      <input type="range" min="0" max="100" v-model="stats.currentTrackProgress" @change="seekAudioFile()" />
+    </div>
+
+    <p>Selected image path: {{ selectedImagePath }}</p>
+    <p>Percentage of progress: {{ stats.currentTrackProgress }}</p>
+
+    <img :src="selectedImagePath" className="h-200"/>
+
+    <form class="row" @submit.prevent="greet">
+      <input id="greet-input" v-model="name" placeholder="Enter a name..." />
+      <button type="submit">Greet</button>
+    </form>
+
+    <!-- playback rate number input. 0 to 10, increase by 0.1 -->
+    <div class="row">
+      Playback speed
+      <input type="number" min="0" max="10" step="0.1" v-model="appData.current_speed" @input="changecurrent_speed" />
+    </div>
+
+    <!-- time remaining, but actual time accoding to current playback rate. Limit to seconds-->
+    <div class="row">
+      Time remaining: {{ ((stats.currentTrackDuration - stats.currentTrackProgress) / appData.current_speed).toFixed(0) }}
+    </div>
+
+    <p>{{ greetMsg }}</p>
   </div>
-
-  <!-- progress bar where we can move around -->
-  <div class="row">
-    <input type="range" min="0" max="100" v-model="stats.currentTrackProgress" @change="seekAudioFile()" />
-  </div>
-
-  <p>Selected image path: {{ selectedImagePath }}</p>
-  <p>Percentage of progress: {{ stats.currentTrackProgress }}</p>
-
-  <img :src="selectedImagePath" className="h-200"/>
-
-  <form class="row" @submit.prevent="greet">
-    <input id="greet-input" v-model="name" placeholder="Enter a name..." />
-    <button type="submit">Greet</button>
-  </form>
-
-  <!-- playback rate number input. 0 to 10, increase by 0.1 -->
-  <div class="row">
-    Playback speed
-    <input type="number" min="0" max="10" step="0.1" v-model="stats.playbackRate" @input="changePlaybackRate" />
-  </div>
-
-  <!-- time remaining, but actual time accoding to current playback rate. Limit to seconds-->
-  <div class="row">
-    Time remaining: {{ ((stats.currentTrackDuration - stats.currentTrackProgress) / stats.playbackRate).toFixed(0) }}
-  </div>
-
-  <p>{{ greetMsg }}</p>
 </template>
