@@ -14,7 +14,7 @@ let loading = ref(true); // this is for the initial load of the library from rus
 let showSpeed = ref(false);
 
 let appData = reactive({
-  library: [],
+  library: reactive([]),
   current_speed: 1,
 });
 
@@ -51,12 +51,8 @@ setInterval(() => {
   }
 }, 1000);
 
-const greetMsg = ref("");
-const name = ref("");
-
+// main audio object
 let audio = ref(null);
-
-const selectedImagePath = ref("");
 
 async function addNew() {
   const selected = await open({
@@ -124,8 +120,10 @@ async function importBookConfirm() {
     if (data === 'OK') {
       // we need to update our appData
       invoke("get_app_data").then((data) => {
+        loading.value = false;
         appData = data;
         console.log('got app data', appData);
+        loading.value = false;
       });
     }
   });
@@ -233,16 +231,12 @@ async function selectAudioFile() {
       }
 }
 
-async function greet() {
-  greetMsg.value = await invoke("greet", { name: name.value });
-  selectAudioFile();
-}
-
-function playChapter(chapter) {
+function playChapter(chapter, title) {
   stats.playing = false;
   console.log('playing chapter', chapter);
   const path = convertFileSrc(chapter);
   stats.currentTrack = path;
+  stats.currentTitle = title;
   stats.playing = true;
   playAudioFile();
 }
@@ -251,7 +245,11 @@ function secondsToPrettyTime(seconds) {
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor(seconds / 60) % 60;
   const secondsLeft = seconds % 60;
-  return `${hours}:${minutes}:${secondsLeft.toFixed(0)}`;
+  if (hours > 0) {
+    return `${hours}:${minutes}:${secondsLeft.toFixed(0)}`;
+  } else {
+    return `${minutes}:${secondsLeft.toFixed(0)}`;
+  }
 }
 
 console.log('loaded player', appData);
@@ -284,18 +282,14 @@ loaded.value = true;
       <button @click="importBookConfirm()">OK</button>
     </div>
 
-    <form class="row" @submit.prevent="greet">
-      <input id="greet-input" v-model="name" placeholder="Test" />
-      <button type="submit">TEST</button>
-    </form>
-
     <Library v-if="!loading.value && appData && appData.library" :library="appData.library" @playChapter="playChapter" />
 
     <!-- sticky bar at the bottom with play/pause, rewind, skip, and seek -->
     <div class="sticky-bar">
       <div class="one">
-        <p v-if="!stats.currentTrack">Welcome to Marble</p>
-        <p v-else>Playing: {{ stats.currentTrack.slice(0, 15) }} ... {{ stats.currentTrack.slice(-25) }}</p>
+        <p v-if="!stats.currentTitle">Welcome to Marble</p>
+        <p v-else-if="stats.currentTitle.length <= 43">Playing: {{ stats.currentTitle }}</p>
+        <p v-else>Playing: {{ stats.currentTitle.slice(0, 15) }} ... {{ stats.currentTitle.slice(-25) }}</p>
       </div>
       <div class="wide">
         <div class="controls">
