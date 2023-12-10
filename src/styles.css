@@ -13,3 +13,151 @@
   -moz-osx-font-smoothing: grayscale;
   -webkit-text-size-adjust: 100%;
 }
+
+.importDialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background-color: #161616;
+  border: 1px solid #f3f3f3;
+  border-radius: 5px;
+  padding: 20px;
+  z-index: 100;
+  max-height: 90%;
+  overflow-y: auto;
+  width: 80%;
+}
+
+.book-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-gap: 1rem;
+  padding: 1rem;
+}
+
+.book {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  border: 1px solid #f3f3f3;
+  border-radius: 5px;
+  cursor: pointer;
+  width: 200px;
+  height: 300px;
+}
+
+.book-capital {
+  font-size: 45px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.metadata {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  text-align: center;
+}
+
+.sticky-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 10px;
+  background-color: #161616;
+  border-top: 1px solid #f3f3f3;
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+}
+
+div.one {
+  flex: 4;
+}
+
+div.two {
+  flex: 4;
+  display: flex;
+  flex-direction: column;
+}
+div.two div {
+  flex: 1;
+  justify-content: right;
+  display: flex;
+}
+
+div.wide {
+  flex: 7;
+}
+
+div.wide div {
+  width: 100%;
+  padding: 0 2rem;
+}
+
+div.controls {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  gap: .8rem;
+  align-items: center;
+}
+
+div.icon-wrapper {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: .3rem;
+  line-height: 1.5rem;
+  text-align: center;
+  cursor: pointer;
+  margin: auto 0;
+}
+
+div.two div p {
+  margin: auto 0;
+  line-height: 2.5rem;
+}
+
+img.icon {
+  width: 1.5rem;
+  height: 1.5rem;
+  cursor: pointer;
+  background: transparent;
+  padding: .3rem;
+}
+
+img.icon:hover {
+  background: #313131;
+  border-radius: 50%;
+}
+
+img.large-icon {
+  width: 2.3rem;
+  height: 2.3rem;
+}
+
+div.progress {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+}
+
+.sticky-bar input[type="range"] {
+  -webkit-appearance: none;
+  width: 80%;
+  height: 5px;
+  background-color: #f3f3f3;
+  border-radius: 5px;
+  outline: none;
+  opacity: 0.7;
+  -webkit-transition: 0.2s;
+  transition: opacity 0.2s;
+}

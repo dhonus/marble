@@ -1,37 +1,53 @@
 <script setup>
 import { ref, reactive } from "vue";
+import { listen } from '@tauri-apps/api/event'
 import { invoke } from "@tauri-apps/api/tauri";
 import {Howl, Howler} from 'howler';
-import { appDataDir, join } from '@tauri-apps/api/path';
-import { readBinaryFile } from "@tauri-apps/api/fs"
+import { appDataDir, homeDir, join } from '@tauri-apps/api/path';
+import { readBinaryFile, readDir, BaseDirectory } from "@tauri-apps/api/fs"
 import { open } from "@tauri-apps/api/dialog"
 import { convertFileSrc } from '@tauri-apps/api/tauri';
+import Library from './Library.vue';
 
-let loaded = reactive(false);
+let loaded = ref(false);
+let loading = ref(true); // this is for the initial load of the library from rust
+let showSpeed = ref(false);
 
 let appData = reactive({
-  library: {},
+  library: [],
   current_speed: 1,
+});
+
+let importStatus = reactive({
+  importing: false,
+  files: [],
+  name: '',
+  author: '',
 });
 
 // get our appData from rust
 invoke("get_app_data").then((data) => {
-  appData = data;
+  appData = reactive(data);
   console.log('got app data', appData);
+  loading.value = false; 
 });
 
 // object with info about current playback
 const stats = reactive({
   currentTrack: null,
   currentTrackDuration: null,
-  currentTrackProgress: null,
+  currentTrackProgress: 0,
+  currentTime: 0,
+  playing: false,
 });
 
 // update the stats
 setInterval(() => {
-  if (stats.currentTrack && audio) {
-    stats.currentTrackProgress = audio.seek();
+  if (stats.currentTrack && audio && audio.playing()) {
+    stats.currentTrackProgress = audio.seek() / audio.duration() * 100;
+    stats.currentTime = audio.seek();
     stats.currentTrackDuration = audio.duration();
+    console.log('updating stats', stats);
   }
 }, 1000);
 
@@ -41,6 +57,83 @@ const name = ref("");
 let audio = ref(null);
 
 const selectedImagePath = ref("");
+
+async function addNew() {
+  const selected = await open({
+    directory: true,
+    defaultPath: await homeDir(),
+  });
+
+   if (Array.isArray(selected)) {
+      // user selected multiple directories
+    } else if (selected === null) {
+      // user cancelled the selection
+    } else {
+      // user selected a single directory
+      if (selected !== null) {
+        const path = convertFileSrc(selected);
+        console.log('selected', selected);
+        const entries = await readDir(selected);
+        importStatus.files = entries;
+        importStatus.name = selected;
+        importStatus.path = selected;
+        importBook();
+      }
+    }
+}
+
+async function handleFileDrop (event) {
+  console.log(event);
+  // first make sure this is a folder and not a file
+  try {
+    const entries = await readDir(event.payload[0]);
+    importStatus.files = entries;
+    importStatus.name = event.payload[0];
+    importStatus.path = event.payload[0];
+    importBook();
+  } catch (error) {
+    console.log('Not a directory');
+  }
+}
+
+listen('tauri://file-drop', event => {
+  handleFileDrop(event)
+})
+
+async function importBook() {
+  console.log('importing book', importStatus);
+  importStatus.importing = true;
+}
+
+async function importBookConfirm() {
+  console.log('importing book', importStatus);
+  if (importStatus.files.length === 0) {
+    return;
+  }
+
+  // we want to properly escape the path
+  const sending = {
+    name: importStatus.name,
+    author: importStatus.author,
+    path: importStatus.path,
+  }
+  // send the files to rust
+  invoke("import_book", { book: sending }).then((data) => {
+    console.log('imported book', data);
+    importStatus.files = [];
+    if (data === 'OK') {
+      // we need to update our appData
+      invoke("get_app_data").then((data) => {
+        appData = data;
+        console.log('got app data', appData);
+      });
+    }
+  });
+  importStatus.importing = false;
+  importStatus.name = '';
+  importStatus.author = '';
+  importStatus.path = '';
+}
 
 async function playAudioFile() {
   const { currentTrack } = stats
@@ -62,6 +155,9 @@ async function playAudioFile() {
           reader.readAsDataURL(blob);
           reader.onloadend = function() {
             const base64data = reader.result;
+            try {
+              audio.unload();
+            } catch (_) {}
             audio = new Howl({
               src: [base64data],
               html5: true, // this is so we can change playback rate without the pitch increasing
@@ -82,8 +178,17 @@ async function playAudioFile() {
 };
 
 function togglePlay(){
+  stats.playing = !stats.playing;
   return audio.playing() ? audio.pause() : audio.play();
 };
+
+// catch spacebar to play/pause
+document.addEventListener('keydown', function(event) {
+  if(event.keyCode === 32) {
+    event.preventDefault();
+    togglePlay();
+  }
+});
 
 function rewind() {
   audio.seek(audio.seek() - 10);
@@ -98,10 +203,12 @@ function changecurrent_speed() {
 }
 
 function seekAudioFile() {
+  // const seek = audio.duration() / 100 * parseInt(stats.currentTrackProgress);
+  // console.log('seeking to', seek);
   audio.pause();
-  const seek = audio.duration() * (stats.currentTrackProgress / 100);
-  console.log('seeking to', seek);
-  audio.seek(seek);
+  // they're messing with me in the docs, this expects a percentage...
+  //audio.seek(parseInt(stats.currentTrackProgress));
+  audio.seek(audio.duration() / 100 * parseInt(stats.currentTrackProgress));
   audio.play();
 }
 
@@ -115,13 +222,15 @@ async function selectAudioFile() {
         extensions: ["mp3", "wav", "ogg"]
       }]
     });
-  
+
+    console.log(selected);
+
     if (selected !== null) {
-      const path = convertFileSrc(selected);
-      stats.currentTrack = path;
-      stats.playing = true;
-      playAudioFile();
-    }
+        const path = convertFileSrc(selected);
+        stats.currentTrack = path;
+        stats.playing = true;
+        playAudioFile();
+      }
 }
 
 async function greet() {
@@ -129,45 +238,95 @@ async function greet() {
   selectAudioFile();
 }
 
-loaded = true;
+function playChapter(chapter) {
+  stats.playing = false;
+  console.log('playing chapter', chapter);
+  const path = convertFileSrc(chapter);
+  stats.currentTrack = path;
+  stats.playing = true;
+  playAudioFile();
+}
+
+function secondsToPrettyTime(seconds) {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor(seconds / 60) % 60;
+  const secondsLeft = seconds % 60;
+  return `${hours}:${minutes}:${secondsLeft.toFixed(0)}`;
+}
+
+console.log('loaded player', appData);
+loaded.value = true;
 
 </script>
 
 <template>
   <div v-if="loaded">
-    <!-- play pause buttons etc -->
-    <div class="row">
-      <button @click="rewind()">Rewind</button>
-      <button @click="togglePlay()">Toggle</button>
-      <button @click="skip()">Skip</button>
+    <div ref="importDialog" v-if="importStatus.importing" class="importDialog">
+      <h1>Import</h1>
+      <!-- set custom name -->
+      <div>
+        <label for="name">Name</label>
+        <input type="text" id="name" v-model="importStatus.name" />
+        <label for="author">Author</label>
+        <input type="text" id="author" v-model="importStatus.author" />
+      </div>
+      <p>The following files will be imported:</p>
+      <ul>
+        <li v-for="file in importStatus.files">
+          {{ file.name }}
+          <ul v-if="file.children">
+            <li v-for="child in file.children">
+              {{ child.name }}
+            </li>
+          </ul>
+        </li>
+      </ul>
+      <button @click="importBookConfirm()">OK</button>
     </div>
-
-    <!-- progress bar where we can move around -->
-    <div class="row">
-      <input type="range" min="0" max="100" v-model="stats.currentTrackProgress" @change="seekAudioFile()" />
-    </div>
-
-    <p>Selected image path: {{ selectedImagePath }}</p>
-    <p>Percentage of progress: {{ stats.currentTrackProgress }}</p>
-
-    <img :src="selectedImagePath" className="h-200"/>
 
     <form class="row" @submit.prevent="greet">
-      <input id="greet-input" v-model="name" placeholder="Enter a name..." />
-      <button type="submit">Greet</button>
+      <input id="greet-input" v-model="name" placeholder="Test" />
+      <button type="submit">TEST</button>
     </form>
 
-    <!-- playback rate number input. 0 to 10, increase by 0.1 -->
-    <div class="row">
-      Playback speed
-      <input type="number" min="0" max="10" step="0.1" v-model="appData.current_speed" @input="changecurrent_speed" />
-    </div>
+    <Library v-if="!loading.value && appData && appData.library" :library="appData.library" @playChapter="playChapter" />
 
-    <!-- time remaining, but actual time accoding to current playback rate. Limit to seconds-->
-    <div class="row">
-      Time remaining: {{ ((stats.currentTrackDuration - stats.currentTrackProgress) / appData.current_speed).toFixed(0) }}
+    <!-- sticky bar at the bottom with play/pause, rewind, skip, and seek -->
+    <div class="sticky-bar">
+      <div class="one">
+        <p v-if="!stats.currentTrack">Welcome to Marble</p>
+        <p v-else>Playing: {{ stats.currentTrack.slice(0, 15) }} ... {{ stats.currentTrack.slice(-25) }}</p>
+      </div>
+      <div class="wide">
+        <div class="controls">
+          <img src="/replay_10_FILL1_wght400_GRAD0_opsz24.svg" class="icon" @click="rewind()"/>
+          <img :src="(stats.playing) ? '/pause_circle_FILL1_wght400_GRAD0_opsz24.svg' : '/play_circle_FILL1_wght400_GRAD0_opsz24.svg'" @click="togglePlay()" class="icon large-icon" />
+          <img src="/forward_10_FILL1_wght400_GRAD0_opsz24.svg" class="icon" @click="skip()" />
+        </div>
+        <div class="progress">
+          {{ secondsToPrettyTime(stats.currentTime) }}
+          <input type="range" min="0" max="100" v-model="stats.currentTrackProgress" @change="seekAudioFile()" />
+          {{ secondsToPrettyTime(stats.currentTrackDuration) }}
+        </div>
+      </div>
+      <!-- first 10 letters of current track ... last 10 letters of current track -->
+      <div class="two">
+        <div>
+          <img src="/folder_FILL0_wght400_GRAD0_opsz24.svg" class="icon" @click="addNew()"/>
+          <p>Import</p>
+          <!--Import: <button @click="addNew()">Select new directory</button>-->
+        </div>
+        <div>
+          <!-- playback rate number input. 0 to 10, increase by 0.1 -->
+          <div class="row icon-wrapper" @click="showSpeed = !showSpeed">
+            <img src="/speed_FILL0_wght400_GRAD0_opsz24.svg" class="icon" />
+            <!-- click to show the number input -->
+            <span class="current-speed" >{{ appData.current_speed }}x</span>
+          </div>
+          <input type="number" min="0" max="10" step="0.1" v-model="appData.current_speed" @input="changecurrent_speed" v-if="showSpeed" />
+        </div>
+      </div>
     </div>
+</div>
 
-    <p>{{ greetMsg }}</p>
-  </div>
 </template>
